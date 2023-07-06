@@ -16,6 +16,9 @@ bool connection_ok = false;
 
 int current_connection = 0;
 
+char * buffer;
+int len_buffer = 1;
+
 // TODO: regarder comment attendre que la connection s'établisse...
 
 void event_handler(void * event_handler_arg, esp_event_base_t event_base, int32_t event_id, void * event_data)
@@ -74,6 +77,24 @@ esp_err_t http_event_handler(esp_http_client_event_t * event)
 			break;
 		case HTTP_EVENT_ON_DATA:
 			ESP_LOGI("HTTP Data", "Data received");
+			if (esp_http_client_is_chunked_response(event->client))
+			{
+				ESP_LOGI("HTTP Data", "Data are chunked response");
+				ESP_LOGI("HTTP Data", "Length of data: %d", event->data_len);
+				printf("len_buffer: %d\n", len_buffer);
+				len_buffer += event->data_len;
+				printf("len_buffer_post_add: %d\n", len_buffer);
+				buffer = realloc(buffer, sizeof(char) * len_buffer);
+				for (int i = 0; i < event->data_len; i++)
+				{
+					buffer[len_buffer - 1 - event->data_len + i] = ((char *) event->data)[i];
+				}
+				buffer[len_buffer - 1] = '\n';
+			}
+			else
+			{
+				ESP_LOGI("HTTP Data", "Data aren't chunked response. Do something");
+			}
 			break;
 		case HTTP_EVENT_ON_HEADER:
 			ESP_LOGI("HTTP Header", "Header received");
@@ -128,6 +149,14 @@ int http_test(void)
 		return -1;
 	}
 
+	error = esp_http_client_fetch_headers(client);
+	if (error != ESP_OK)
+	{
+		ESP_LOGE("HTTP Protocol", "Error when trying fetch headers");
+		error_exit(client);
+		return -1;
+	}
+
 	// // On indique au server qu'on est là
 	// error = esp_http_client_write(client, "Coucou !", 8);
 	// if (error == -1)
@@ -136,13 +165,14 @@ int http_test(void)
 	// }
 
 	// On commence par définir ou
-	int content_length_chunk;
-	error = esp_http_client_get_chunk_length(client, &content_length_chunk);
-	if (error != ESP_OK)
-	{
-		ESP_LOGE("HTTP Protocol", "Error when trying to get content length of chunked encoding message");
-	}
+	// int content_length_chunk;
+	// error = esp_http_client_get_chunk_length(client, &content_length_chunk);
+	// if (error != ESP_OK)
+	// {
+	// 	ESP_LOGE("HTTP Protocol", "Error when trying to get content length of chunked encoding message");
+	// }
 	
+	/*
 	// On fait correspondre nos headers à ceux du server
 	int content_length = esp_http_client_fetch_headers(client);
 	if (content_length == ESP_FAIL)
@@ -185,7 +215,10 @@ int http_test(void)
 		error_exit(client);
 		return -1;
 	}
-	printf("%s\n", buffer);
+
+	*/
+	// printf("%s\n", buffer);
+	write(1, buffer, len_buffer);
 
 	// Fermeture de la connection et libération des ressources
 	esp_http_client_close(client);
