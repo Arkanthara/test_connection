@@ -13,14 +13,11 @@ void app_main(void)
 	{
 		ESP_LOGE("Initialisation mémoire nvs", "Erreur: %s", esp_err_to_name(error));
 	}
+
+	// Appel de la fonction créée dans le fichier connect.c
 	connect_to_wifi();
-	// sleep(5000);
-	// int sock = create_socket("192.168.0.97", 27015);
-	// if (sock == -1)
-	// {
-	// 	exit(FEXIT_FAILURE);
-	// }
-	// write(sock, "Coucou", 8);
+	
+	// Message indiquant qu'on a tout fini
 	ESP_LOGI("FIN", "On est arrivé à la fin du programme !");
 
 }
