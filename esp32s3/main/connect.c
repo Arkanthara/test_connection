@@ -9,10 +9,63 @@
 
 #include "esp_http_client.h"
 
+#define MAX_CONNECTION 3
+
+bool connection_ok = false;
+
+int current_connection = 0;
+
 // TODO: regarder comment attendre que la connection s'établisse...
+
+void event_handler(void * event_handler_arg, esp_event_base_t event_base, int32_t event_id, void * event_data)
+{
+	if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
+	{
+		esp_wifi_connect();
+	}
+	else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
+	{
+		ESP_LOGE("Status connection", "Disconnected");
+		if (current_connection < MAX_CONNECTION)
+		{
+			esp_wifi_connect();
+			current_connection ++;
+		}
+	}
+	else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED)
+	{
+		ESP_LOGI("Status connection", "Connected");
+		// esp_netif_action_start(NULL, event_base, event_id, event_data);
+	}
+	else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+	{
+		ESP_LOGI("IP", "We have an IP address !");
+		ip_event_got_ip_t * event = (ip_event_got_ip_t *) event_data;
+		ESP_LOGI("IP", "The ip address is: " IPSTR, IP2STR(&event->ip_info.ip));
+		connection_ok = true;
+	}
+
+	// Gestion des messages http !!!!
+	else if (event_base == ESP_EVENT_ANY_BASE && event_id == HTTP_EVENT_ON_CONNECTED)
+	{
+		ESP_LOGI("HTTP Status", "Connected");
+	}
+	else if (event_base == ESP_EVENT_ANY_BASE && event_id == HTTP_EVENT_DISCONNECTED)
+	{
+		ESP_LOGI("HTTP Status", "Disconnected");
+	}
+	else if (event_base == ESP_EVENT_ANY_BASE && event_id == HTTP_EVENT_ON_FINISH)
+	{
+		ESP_LOGI("HTTP Status", "Protocol terminated");
+	}
+}
 
 void http_test(void)
 {
+	// Initialisation handler pour gestion signaux
+	esp_event_handler_instance_t http_handler;
+	esp_event_handler_instance_register(ESP_EVENT_ANY_BASE, ESP_EVENT_ANY_ID, event_handler, NULL, &http_handler);
+
 	// Initialisation structure de configuration pour échange http
 	esp_http_client_config_t http_configuration = {
 		.url = "http://20.103.43.247/prv/healthz",
@@ -26,11 +79,34 @@ void http_test(void)
 		ESP_LOGE("Initialisation connection http","Erreur lors de l'initialisation de la connection http !");
 	}
 
+	// Test ici
+	// int error = esp_http_client_perform(client);
+	// if (error != ESP_OK)
+	// {
+	// 	ESP_LOGE("Transfert http", "Le transfert http n'a pas fonctionné correctement");
+	// }
+	// int content_length = esp_http_client_get_content_length(client);
+
 	int error = esp_http_client_open(client, 0);
 	if (error != ESP_OK)
 	{
 		ESP_LOGE("Client http", "Connection échouée: %s", esp_err_to_name(error));
 	}
+
+	// On indique au server qu'on est là
+	error = esp_http_client_write(client, "Coucou !", 8);
+	if (error == -1)
+	{
+		ESP_LOGE("HTTP Protocol", "Failed to send message to server !");
+	}
+	
+	// On fait correspondre nos headers à ceux du server
+	error = esp_http_client_fetch_headers(client);
+	if (error == ESP_FAIL)
+	{
+		ESP_LOGE("HTTP Protocol", "Failed to fetch header");
+	}
+
 
 	// Ouverture de la connection et lecture du message reçu
 	// ESP_ERROR_CHECK(esp_http_client_open(client, 0));
@@ -46,37 +122,6 @@ void http_test(void)
 	esp_http_client_close(client);
 	esp_http_client_cleanup(client);
 	ESP_LOGI("OK", "Tout s'est bien passé jusqu'ici ");
-}
-
-void event_handler(void * event_handler_arg, esp_event_base_t event_base, int32_t event_id, void * event_data)
-{
-	if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
-	{
-		esp_wifi_connect();
-	}
-	else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
-	{
-		for (int i = 0; i < 10; i++)
-		{
-			int error = esp_wifi_connect();
-			if (error == ESP_OK)
-			{
-				break;
-			}
-		}
-	}
-	else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED)
-	{
-		ESP_LOGI("Status connection", "Success");
-		// esp_netif_action_start(NULL, event_base, event_id, event_data);
-	}
-	else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
-	{
-		ESP_LOGI("IP", "We have an IP address !");
-		ip_event_got_ip_t * event = (ip_event_got_ip_t *) event_data;
-		ESP_LOGI("IP", "The ip address is: " IPSTR, IP2STR(&event->ip_info.ip));
-		http_test();
-	}
 }
 
 void connect_to_wifi(void)
@@ -163,6 +208,12 @@ void connect_to_wifi(void)
 	if (error != ESP_OK)
 	{
 		ESP_LOGE("Configuration wifi", "Erreur: %s", esp_err_to_name(error));
+	}
+	while (!connection_ok)
+	{}
+	if (connection_ok)
+	{
+		http_test();
 	}
 
 	// Connection
