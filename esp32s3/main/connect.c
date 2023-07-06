@@ -5,6 +5,9 @@
 #include "esp_netif.h"
 #include <stdlib.h>
 
+#include <sys/types.h>
+#include <unistd.h>
+
 #include "lwip/sys.h"
 #include "lwip/err.h"
 
@@ -15,6 +18,8 @@
 bool connection_ok = false;
 
 int current_connection = 0;
+
+int pid;
 
 char * buffer;
 int len_buffer = 1;
@@ -47,22 +52,9 @@ void event_handler(void * event_handler_arg, esp_event_base_t event_base, int32_
 		ip_event_got_ip_t * event = (ip_event_got_ip_t *) event_data;
 		ESP_LOGI("IP", "The ip address is: " IPSTR, IP2STR(&event->ip_info.ip));
 		connection_ok = true;
+
+		// Release a semphore
 	}
-/*
-	// Gestion des messages http !!!!
-	else if (event_base == ESP_EVENT_ANY_BASE && event_id == HTTP_EVENT_ON_CONNECTED)
-	{
-		ESP_LOGI("HTTP Status", "Connected");
-	}
-	else if (event_base == ESP_EVENT_ANY_BASE && event_id == HTTP_EVENT_DISCONNECTED)
-	{
-		ESP_LOGI("HTTP Status", "Disconnected");
-	}
-	else if (event_base == ESP_EVENT_ANY_BASE && event_id == HTTP_EVENT_ON_FINISH)
-	{
-		ESP_LOGI("HTTP Status", "Protocol terminated");
-	}
-	*/
 }
 
 esp_err_t http_event_handler(esp_http_client_event_t * event)
@@ -114,13 +106,16 @@ void error_exit(esp_http_client_handle_t client)
 
 int http_test(void)
 {
+	// Wait for sempahore to be released 
+
 	// Initialisation handler pour gestion signaux
 	esp_event_handler_instance_t http_handler;
 	esp_event_handler_instance_register(ESP_EVENT_ANY_BASE, ESP_EVENT_ANY_ID, event_handler, NULL, &http_handler);
 
 	// Initialisation structure de configuration pour échange http
 	esp_http_client_config_t http_configuration = {
-		.url = "http://20.103.43.247/prv/healthz",
+	//	.url = "http://20.103.43.247/prv/healthz",
+		.url = "http://20.103.43.247/cmp/api/v1/Sim",
 		.event_handler = http_event_handler,
 	};
 
@@ -131,15 +126,6 @@ int http_test(void)
 		ESP_LOGE("Initialisation connection http","Erreur lors de l'initialisation de la connection http !");
 		return -1;
 	}
-
-/*	// Test ici
-	int error = esp_http_client_perform(client);
-	if (error != ESP_OK)
-	{
-		ESP_LOGE("Transfert http", "Le transfert http n'a pas fonctionné correctement");
-	}
-	int content_length = esp_http_client_get_content_length(client);
-*/
 
 	int error = esp_http_client_open(client, 0);
 	if (error != ESP_OK)
@@ -156,67 +142,6 @@ int http_test(void)
 		error_exit(client);
 		return -1;
 	}
-
-	// // On indique au server qu'on est là
-	// error = esp_http_client_write(client, "Coucou !", 8);
-	// if (error == -1)
-	// {
-	// 	ESP_LOGE("HTTP Protocol", "Failed to send message to server !");
-	// }
-
-	// On commence par définir ou
-	// int content_length_chunk;
-	// error = esp_http_client_get_chunk_length(client, &content_length_chunk);
-	// if (error != ESP_OK)
-	// {
-	// 	ESP_LOGE("HTTP Protocol", "Error when trying to get content length of chunked encoding message");
-	// }
-	
-	/*
-	// On fait correspondre nos headers à ceux du server
-	int content_length = esp_http_client_fetch_headers(client);
-	if (content_length == ESP_FAIL)
-	{
-		ESP_LOGE("HTTP Protocol", "Failed to fetch header");
-		error_exit(client);
-		return -1;
-	}
-	else if (content_length == 0)
-	{
-		if (esp_http_client_is_chunked_response(client))
-		{
-			ESP_LOGI("HTTP Protocol", "Response is chunked");
-			content_length = content_length_chunk;
-
-		}
-		else
-		{
-			ESP_LOGE("HTTP Protocol", "Stream doesn't contain content-length header");
-			error_exit(client);
-			return -1;
-		}
-	}
-	printf("content_length = %d\n", content_length);
-
-	if (content_length == 0)
-	{
-		ESP_LOGE("ERROR", "content_length = 0");
-		error_exit(client);
-		return -1;
-	}
-
-	// Ouverture de la connection et lecture du message reçu
-	// ESP_ERROR_CHECK(esp_http_client_open(client, 0));
-	char * buffer = malloc(content_length * sizeof(char));
-	error = esp_http_client_read(client, buffer, content_length);
-	if (error == -1)
-	{
-		ESP_LOGE("Lecture données","Une erreur est survenue lors de la réception du message du server !");
-		error_exit(client);
-		return -1;
-	}
-
-	*/
 	// printf("%s\n", buffer);
 	write(1, buffer, len_buffer);
 
@@ -229,6 +154,7 @@ int http_test(void)
 
 void connect_to_wifi(void)
 {
+
 	// Initialisation d'une network stack
 	int error = esp_netif_init();
 	if (error != ESP_OK)
@@ -299,7 +225,6 @@ void connect_to_wifi(void)
 	}
 
 	*/
-	// Besoin de définir le protocole ???
 	// Configuration du wifi
 	wifi_config_t wifi = {
 		.sta = {
@@ -318,13 +243,6 @@ void connect_to_wifi(void)
 	{
 		http_test();
 	}
-
-	// Connection
-	// error = esp_wifi_connect();
-	// if (error != ESP_OK)
-	// {
-	// 	ESP_LOGE("Connect wifi", "Erreur: %s\n", esp_err_to_name(error));
-	// }
 	ESP_LOGI("OK", "Tout se passe bien jusqu'ici");
 
 }
@@ -358,64 +276,4 @@ void connect_to_wifi(void)
 --------+        +===========================+
 communication                                                NETWORK STACK
 DRIVER                   ESP-NETIF
-*/
-
-// void http_test(void)
-// {
-// 	// Initialisation de notre connection http
-// 	esp_http_client_config_t config = {
-// 		.url = "http://20.103.43.247/prv/healthz",
-// 	};
-// 	esp_http_client_handle_t client = esp_http_client_init(&config);
-// 	if (client == NULL)
-// 	{
-// 		ESP_LOGE("Initialisation", "Erreur lors de l'initialisation de la connection http");
-// 	}
-// 
-// 	int error = esp_http_client_open(client, 0);
-// 	if (error != ESP_OK)
-// 	{
-// 		ESP_LOGE("Connection", "Erreur: %s\n", esp_err_to_name(error));
-// 	}
-// 
-// 
-// 
-// }
-
-
-
-
-/*
-int create_socket(const char * host, int port)
-{
-	struct sockaddr_in address;
-	address.sin_family = AF_INET;
-	if (inet_pton(AF_INET, host, &address.sin_addr) != 1)
-	{
-		//fprintf(stderr, "Erreur\n");
-		printf("ERREUR\n");
-		return -1;
-	}
-	address.sin_port = htons(port);
-	int sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (connect(sock, (struct sockaddr *) &address, sizeof(address)) != 0)
-	{
-		fprintf(stderr, "Erreur lors de la connection du socket: %s\n", strerror(errno));
-		return -1;
-	}
-	return sock;
-}
-
-void prepare_adress(struct sockaddr_in * address, const char * host, int port)
-{
-	memset(address, 0, sizeof(struct sockaddr_in));
-	address->sin_family = AF_INET;
-	if (inet_pton(AF_INET, host, &address->sin_addr) != 1)
-	{
-		fprintf(stderr, "Erreur\n");
-		exit(EXIT_FAILURE);
-	}
-	address->sin_port = htons(port);
-
-}
 */
