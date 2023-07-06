@@ -1,7 +1,7 @@
 {
     "version":            "1",
     "project_name":       "esp32s3",
-    "project_version":    "76c8ba3-dirty",
+    "project_version":    "17eb7c8-dirty",
     "project_path":       "C:/Users/midonnet/Documents/test_connection/esp32s3",
     "idf_path":           "C:/Espressif/frameworks/esp-idf-v4.4-2",
     "build_dir":          "C:/Users/midonnet/Documents/test_connection/esp32s3/build",

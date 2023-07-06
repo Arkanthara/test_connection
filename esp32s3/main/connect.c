@@ -3,6 +3,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#include <stdlib.h>
 
 #include "lwip/sys.h"
 #include "lwip/err.h"
@@ -44,7 +45,7 @@ void event_handler(void * event_handler_arg, esp_event_base_t event_base, int32_
 		ESP_LOGI("IP", "The ip address is: " IPSTR, IP2STR(&event->ip_info.ip));
 		connection_ok = true;
 	}
-
+/*
 	// Gestion des messages http !!!!
 	else if (event_base == ESP_EVENT_ANY_BASE && event_id == HTTP_EVENT_ON_CONNECTED)
 	{
@@ -58,9 +59,39 @@ void event_handler(void * event_handler_arg, esp_event_base_t event_base, int32_
 	{
 		ESP_LOGI("HTTP Status", "Protocol terminated");
 	}
+	*/
 }
 
-void http_test(void)
+esp_err_t http_event_handler(esp_http_client_event_t * event)
+{
+	switch(event->event_id)
+	{
+		case HTTP_EVENT_ON_CONNECTED:
+			ESP_LOGI("HTTP Status", "Connected");
+			break;
+		case HTTP_EVENT_DISCONNECTED:
+			ESP_LOGI("HTTP Status", "Disconnected");
+			break;
+		case HTTP_EVENT_ON_DATA:
+			ESP_LOGI("HTTP Data", "Data received");
+			break;
+		case HTTP_EVENT_ON_HEADER:
+			ESP_LOGI("HTTP Header", "Header received");
+			break;
+		default:
+			ESP_LOGI("Handler", "Executed one time");
+			break;
+
+	}
+	return ESP_OK;
+}
+
+void error_exit(esp_http_client_handle_t client)
+{
+	esp_http_client_cleanup(client);
+}
+
+int http_test(void)
 {
 	// Initialisation handler pour gestion signaux
 	esp_event_handler_instance_t http_handler;
@@ -69,7 +100,7 @@ void http_test(void)
 	// Initialisation structure de configuration pour échange http
 	esp_http_client_config_t http_configuration = {
 		.url = "http://20.103.43.247/prv/healthz",
-		//.auth_type = HTTP_AUTH_TYPE_NONE,
+		.event_handler = http_event_handler,
 	};
 
 	// Création de la connection
@@ -77,44 +108,82 @@ void http_test(void)
 	if (client == NULL)
 	{
 		ESP_LOGE("Initialisation connection http","Erreur lors de l'initialisation de la connection http !");
+		return -1;
 	}
 
-	// Test ici
-	// int error = esp_http_client_perform(client);
-	// if (error != ESP_OK)
-	// {
-	// 	ESP_LOGE("Transfert http", "Le transfert http n'a pas fonctionné correctement");
-	// }
-	// int content_length = esp_http_client_get_content_length(client);
+/*	// Test ici
+	int error = esp_http_client_perform(client);
+	if (error != ESP_OK)
+	{
+		ESP_LOGE("Transfert http", "Le transfert http n'a pas fonctionné correctement");
+	}
+	int content_length = esp_http_client_get_content_length(client);
+*/
 
 	int error = esp_http_client_open(client, 0);
 	if (error != ESP_OK)
 	{
 		ESP_LOGE("Client http", "Connection échouée: %s", esp_err_to_name(error));
+		error_exit(client);
+		return -1;
 	}
 
-	// On indique au server qu'on est là
-	error = esp_http_client_write(client, "Coucou !", 8);
-	if (error == -1)
+	// // On indique au server qu'on est là
+	// error = esp_http_client_write(client, "Coucou !", 8);
+	// if (error == -1)
+	// {
+	// 	ESP_LOGE("HTTP Protocol", "Failed to send message to server !");
+	// }
+
+	// On commence par définir ou
+	int content_length_chunk;
+	error = esp_http_client_get_chunk_length(client, &content_length_chunk);
+	if (error != ESP_OK)
 	{
-		ESP_LOGE("HTTP Protocol", "Failed to send message to server !");
+		ESP_LOGE("HTTP Protocol", "Error when trying to get content length of chunked encoding message");
 	}
 	
 	// On fait correspondre nos headers à ceux du server
-	error = esp_http_client_fetch_headers(client);
-	if (error == ESP_FAIL)
+	int content_length = esp_http_client_fetch_headers(client);
+	if (content_length == ESP_FAIL)
 	{
 		ESP_LOGE("HTTP Protocol", "Failed to fetch header");
+		error_exit(client);
+		return -1;
 	}
+	else if (content_length == 0)
+	{
+		if (esp_http_client_is_chunked_response(client))
+		{
+			ESP_LOGI("HTTP Protocol", "Response is chunked");
+			content_length = content_length_chunk;
 
+		}
+		else
+		{
+			ESP_LOGE("HTTP Protocol", "Stream doesn't contain content-length header");
+			error_exit(client);
+			return -1;
+		}
+	}
+	printf("content_length = %d\n", content_length);
+
+	if (content_length == 0)
+	{
+		ESP_LOGE("ERROR", "content_length = 0");
+		error_exit(client);
+		return -1;
+	}
 
 	// Ouverture de la connection et lecture du message reçu
 	// ESP_ERROR_CHECK(esp_http_client_open(client, 0));
-	char buffer[7];
-	error = esp_http_client_read(client, buffer, 7);
+	char * buffer = malloc(content_length * sizeof(char));
+	error = esp_http_client_read(client, buffer, content_length);
 	if (error == -1)
 	{
 		ESP_LOGE("Lecture données","Une erreur est survenue lors de la réception du message du server !");
+		error_exit(client);
+		return -1;
 	}
 	printf("%s\n", buffer);
 
@@ -122,6 +191,7 @@ void http_test(void)
 	esp_http_client_close(client);
 	esp_http_client_cleanup(client);
 	ESP_LOGI("OK", "Tout s'est bien passé jusqu'ici ");
+	return 0;
 }
 
 void connect_to_wifi(void)
