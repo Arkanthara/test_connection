@@ -13,6 +13,9 @@
 // Définit le temps maximal d'attente de la sémaphore avant de tout arrêter. Ce temps est défini en nano secondes
 #define BLOCKTIME 10000
 
+// On défini le nombre maximal de données lues pour notre esp_http_client_read()
+#define MAX_READ 256
+
 // Indique combien de fois on a essayer de se reconnecter
 int current_connection = 0;
 
@@ -79,6 +82,15 @@ esp_err_t http_event_handler(esp_http_client_event_t * event)
 		// Si on est déconnecté du serveur, on affiche un message
 		case HTTP_EVENT_DISCONNECTED:
 			ESP_LOGI("HTTP Status", "Disconnected");
+			if (len_buffer != 1)
+			{
+				ESP_LOGE("HTTP Protocol", "We don't print the data obtained");
+				ESP_LOGI("Data", "Good lecture");
+				write(1, buffer, len_buffer);
+				free(buffer);
+				buffer = NULL;
+				len_buffer = 1;
+			}
 			break;
 
 		// Si on reçoit des données et que celles-ci sont chunked, alors on effectue des actions...
@@ -93,7 +105,7 @@ esp_err_t http_event_handler(esp_http_client_event_t * event)
 
 				// On indique que le tableau est plus grand
 				len_buffer += event->data_len;
-				printf("len_buffer_post_add: %d\n", event->data_len);
+				printf("len_buffer_post_add: %d\n", len_buffer);
 				
 				// On ajoute de l'espace au tableau
 				buffer = realloc(buffer, sizeof(char) * len_buffer);
@@ -141,8 +153,15 @@ esp_err_t http_event_handler(esp_http_client_event_t * event)
 
 int http_test(void)
 {
+	// Wait for sempahore to be released 
+
+	// Initialisation handler pour gestion signaux
+	esp_event_handler_instance_t http_handler;
+	esp_event_handler_instance_register(ESP_EVENT_ANY_BASE, ESP_EVENT_ANY_ID, event_handler, NULL, &http_handler);
+
 	// Initialisation structure de configuration pour échange http
 	esp_http_client_config_t http_configuration = {
+	//	.url = "http://20.103.43.247/prv/healthz",
 		.url = "http://20.103.43.247/cmp/api/v1/Sim",
 		.event_handler = http_event_handler,
 	};
@@ -155,34 +174,57 @@ int http_test(void)
 		return -1;
 	}
 
-	// Fonction qui appelle toutes les fonctions nécessaires pour un transfert http
-	// Pas réussi à utiliser esp_http_client_open, esp_http_client_fetch_headers, esp_http_client_read à la place...
-	// Faut-il utiliser qu'une seule fois fetch_headers et ensuite boucler tant qu'il reste des données et faire read ????
-	int error = esp_http_client_perform(client);
+	int error = esp_http_client_open(client, 0);
 	if (error != ESP_OK)
 	{
-		ESP_LOGE("HTTP Protocol", "Failed to perform");
+		ESP_LOGE("Client http", "Connection échouée: %s", esp_err_to_name(error));
 		esp_http_client_cleanup(client);
 		return -1;
+	}
+	error = esp_http_client_fetch_headers(client);
+	if (error != ESP_OK && error != ESP_ERR_HTTP_EAGAIN)
+	{
+		ESP_LOGE("HTTP Protocol", "Error when trying fetch headers: %s", esp_err_to_name(error));
+		esp_http_client_cleanup(client);
+		return -1;
+	}
+	int * test = malloc (sizeof(int));
+	error = esp_http_client_flush_response(client, test);
+	if (error != ESP_OK)
+	{
+		ESP_LOGE("HTTP Protocol", "Error when trying get response of server");
+		return -1;
+	}
+	printf("len obtain by flush: %d\n", *test);
+	if (esp_http_client_is_complete_data_received(client))
+	{
+		ESP_LOGI("HTTP Data", "Toutes les données ont été reçues");
 	}
 
-	// Connection à un autre serveur http pour établir une autre connection http
-	error = esp_http_client_set_url(client, "http://20.103.43.247/prv/healthz");
-	if (error != ESP_OK)
-	{
-		ESP_LOGE("Initialisation connection http", "Erreur lors de l'initialisation de la connection http !");
-		esp_http_client_cleanup(client);
-		return -1;
-	}
+	// while (1)
+	// {
+	// 	error = esp_http_client_read(client, buffer_2, MAX_READ);
+	// 	if (error == ESP_ERR_HTTP_EAGAIN)
+	// 	{
+	// 		ESP_LOGE("HTTP Protocol", "Délai dépassé... On renvoie donc ce qu'on a reçu");
+	// 		break;
+	// 	}
+	// 	// printf("Content_size: %s\n", strerror(error));
+	// }
 
-	// Idem que pour au-dessus
-	error = esp_http_client_perform(client);
-	if (error != ESP_OK)
-	{
-		ESP_LOGE("HTTP Protocol", "Failed to perform");
-		esp_http_client_cleanup(client);
-		return -1;
-	}
+	// while (!esp_http_client_is_complete_data_received(client))
+	// {
+	// 	ESP_LOGE("Coucou", "Coucou");
+	// 	error = esp_http_client_fetch_headers(client);
+	// 	if (error != ESP_OK)
+	// 	{
+	// 		ESP_LOGE("HTTP Protocol", "Error when trying fetch headers 2");
+	// 		esp_http_client_cleanup(client);
+	// 		return -1;
+	// 	}
+	// }
+	// printf("%s\n", buffer);
+	// write(1, buffer, len_buffer);
 
 	// Fermeture de la connection et libération des ressources
 	esp_http_client_close(client);
@@ -287,8 +329,9 @@ int connect_to_wifi(void)
 	// Configuration du wifi
 	wifi_config_t wifi = {
 		.sta = {
-			.ssid = "WIFI_Mobile",
-			.password = "428fdcf3d44d5e92a54d1ca5579d21416be03291895184d724abf652f24a",
+			.ssid = "Livebox-4130",
+			//.password = "428fdcf3d44d5e92a54d1ca5579d21416be03291895184d724abf652f24a",
+			.password = "LrKkE5HeSixXowpGgb",
 		},
 	};
 	error = esp_wifi_set_config(WIFI_IF_STA, &wifi);
@@ -322,18 +365,11 @@ int connect_to_wifi(void)
 
 }
 
-/* Fonctionnel, mais pas pour les longs messages...
+/*
 int http_test(void)
 {
-	// Wait for sempahore to be released 
-
-	// Initialisation handler pour gestion signaux
-	esp_event_handler_instance_t http_handler;
-	esp_event_handler_instance_register(ESP_EVENT_ANY_BASE, ESP_EVENT_ANY_ID, event_handler, NULL, &http_handler);
-
 	// Initialisation structure de configuration pour échange http
 	esp_http_client_config_t http_configuration = {
-	//	.url = "http://20.103.43.247/prv/healthz",
 		.url = "http://20.103.43.247/cmp/api/v1/Sim",
 		.event_handler = http_event_handler,
 	};
@@ -346,35 +382,34 @@ int http_test(void)
 		return -1;
 	}
 
-	int error = esp_http_client_open(client, 0);
+	// Fonction qui appelle toutes les fonctions nécessaires pour un transfert http
+	// Pas réussi à utiliser esp_http_client_open, esp_http_client_fetch_headers, esp_http_client_read à la place...
+	// Faut-il utiliser qu'une seule fois fetch_headers et ensuite boucler tant qu'il reste des données et faire read ????
+	int error = esp_http_client_perform(client);
 	if (error != ESP_OK)
 	{
-		ESP_LOGE("Client http", "Connection échouée: %s", esp_err_to_name(error));
+		ESP_LOGE("HTTP Protocol", "Failed to perform");
 		esp_http_client_cleanup(client);
 		return -1;
 	}
 
-	error = esp_http_client_fetch_headers(client);
+	// Connection à un autre serveur http pour établir une autre connection http
+	error = esp_http_client_set_url(client, "http://20.103.43.247/prv/healthz");
 	if (error != ESP_OK)
 	{
-		ESP_LOGE("HTTP Protocol", "Error when trying fetch headers");
+		ESP_LOGE("Initialisation connection http", "Erreur lors de l'initialisation de la connection http !");
 		esp_http_client_cleanup(client);
 		return -1;
 	}
-	printf("Content_size: %d\n", error);
 
-	while (esp_http_client_is_complete_data_received(client))
+	// Idem que pour au-dessus
+	error = esp_http_client_perform(client);
+	if (error != ESP_OK)
 	{
-		error = esp_http_client_fetch_headers(client);
-		if (error != ESP_OK)
-		{
-			ESP_LOGE("HTTP Protocol", "Error when trying fetch headers");
-			esp_http_client_cleanup(client);
-			return -1;
-		}
+		ESP_LOGE("HTTP Protocol", "Failed to perform");
+		esp_http_client_cleanup(client);
+		return -1;
 	}
-	// printf("%s\n", buffer);
-	write(1, buffer, len_buffer);
 
 	// Fermeture de la connection et libération des ressources
 	esp_http_client_close(client);
@@ -383,6 +418,8 @@ int http_test(void)
 	return 0;
 }
 */
+
+
 
 
 /*
